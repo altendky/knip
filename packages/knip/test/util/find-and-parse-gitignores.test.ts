@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import test from 'node:test';
 import { findAndParseGitignores } from '../../src/util/glob-core.js';
 import { resolve } from '../helpers/resolve.js';
+
+// Create the .git file for worktree tests (git won't track files named .git)
+const worktreeRoot = resolve('fixtures/glob-worktree/root');
+writeFileSync(join(worktreeRoot, '.git'), 'gitdir: ../mock-git-dir\n');
 
 test('findAndParseGitignores', async () => {
   const cwd = resolve('fixtures/glob');
@@ -73,6 +79,49 @@ test('findAndParseGitignores (/a/b', async () => {
       '**/.cache/**',
       '**/.npmrc',
       '**/.npmrc/**',
+    ]),
+    unignores: [],
+  });
+});
+
+test('findAndParseGitignores (git worktree with .git file)', async () => {
+  const cwd = resolve('fixtures/glob-worktree/root');
+  const gitignore = await findAndParseGitignores(cwd);
+  // With a .git file (worktree), should NOT traverse to ancestor directories
+  // (contrast with other tests that include ancestor gitignore files like '../../.gitignore')
+  // Should also correctly find info/exclude via the gitdir reference in the .git file
+  assert.deepEqual(gitignore, {
+    gitignoreFiles: ['../mock-git-dir/info/exclude', '.gitignore', 'subdir/.gitignore'],
+    ignores: new Set([
+      '.git',
+      '**/node_modules/**',
+      '.yarn',
+      '**/worktree-exclude-ignored',
+      '**/worktree-exclude-ignored/**',
+      '**/worktree-ignored',
+      '**/worktree-ignored/**',
+      'subdir/**/subdir-ignored',
+      'subdir/**/subdir-ignored/**',
+    ]),
+    unignores: [],
+  });
+});
+
+test('findAndParseGitignores (git worktree with .git file in ancestor)', async () => {
+  const cwd = resolve('fixtures/glob-worktree/root/subdir');
+  const gitignore = await findAndParseGitignores(cwd);
+  // Running from subdirectory within worktree - should stop at ancestor .git file
+  // and NOT continue to real ancestor directories outside the worktree
+  assert.deepEqual(gitignore, {
+    gitignoreFiles: ['../.gitignore', '.gitignore'],
+    ignores: new Set([
+      '.git',
+      '**/node_modules/**',
+      '.yarn',
+      '**/worktree-ignored',
+      '**/worktree-ignored/**',
+      '**/subdir-ignored',
+      '**/subdir-ignored/**',
     ]),
     unignores: [],
   });
